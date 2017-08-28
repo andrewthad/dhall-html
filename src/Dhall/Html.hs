@@ -1,8 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE LambdaCase #-}
 
 module Dhall.Html
   ( typeDom
-  , Node(..)
   , nodeExpr
   ) where
 
@@ -16,12 +16,15 @@ import Data.Text.Buildable (Buildable(..))
 import Text.Trifecta.Delta (Delta(..))
 import Control.Exception (Exception)
 import Data.Vector (Vector)
+import Control.Monad
+import Control.Applicative (liftA2)
 import qualified Data.Vector as V
 import qualified Data.Map.Strict as M
 import qualified Text.XmlHtml as XH
 import qualified Control.Exception
 import qualified Dhall.Context as DC
 import qualified Dhall.Import 
+import qualified Dhall.Html.Import 
 import qualified Dhall.Parser
 import qualified Data.ByteString.Lazy
 import qualified Data.Text
@@ -36,26 +39,29 @@ import qualified Data.Text as T
 typeDom :: Expr s X -> Either (TypeError s) (Expr s X)
 typeDom = typeWith domContext
 
-domContext :: Context (Expr s X)
+domContext :: Context (Expr s a)
 domContext = DC.empty
   & DC.insert "Node" (Const Type)
   & DC.insert "nodeText" (Pi "_" Text nodeType)
   & DC.insert "nodeElement"
-    (Pi "_" Text (Pi "_" (App List (Record (M.fromList [("name",Text),("value",Text)]))) (Pi "_" (App List nodeType) nodeType)))
+    (Pi "_" Text (Pi "_" (App List attrsType) (Pi "_" (App List nodeType) nodeType)))
 
--- Node : Type
+-- Node        : Type
 -- nodeElement : Text -> List {name:Text,value:Text} -> List Node -> Node
--- nodeText : Text -> Node
+-- nodeText    : Text -> Node
 
-nodeType :: Expr s X
+nodeType :: Expr s a
 nodeType = Var (V "Node" 0)
 
-nodeExpr :: Data.Text.Lazy.Text -> IO XH.Node
+attrsType :: Expr s a
+attrsType = Record (M.fromList [("name",Text),("value",Text)])
+
+nodeExpr :: Data.Text.Lazy.Text -> IO [XH.Node]
 nodeExpr text = do
-  let expected = nodeType
+  let expected = App List nodeType :: Expr Src X
   let delta = Directed "(input)" 0 0 0 0
   expr     <- throws (Dhall.Parser.exprFromText delta text)
-  expr'    <- Dhall.Import.load expr
+  expr'    <- Dhall.Html.Import.loadWith domContext expr
   let suffix =
           ( Data.ByteString.Lazy.toStrict
           . Data.Text.Lazy.Encoding.encodeUtf8
@@ -70,30 +76,45 @@ nodeExpr text = do
           _ ->
               Annot expr' expected
   typeExpr <- throws (typeDom annot)
-  case extractNode (Dhall.Core.normalize expr') of
+  let normalized = Dhall.Core.normalize expr' :: Expr X X
+  case extractNodes normalized of
       Just x  -> return x
-      Nothing -> fail "input: malformed `Type`"
+      Nothing -> do
+        print normalized
+        fail "dhall-html internal error, normalization did not work"
 
 throws :: Exception e => Either e a -> IO a
 throws (Left  e) = Control.Exception.throwIO e
 throws (Right r) = return r
 
+extractNodes :: Expr X X -> Maybe [XH.Node]
+extractNodes = \case
+  ListLit _ exprs -> mapM extractNode (V.toList exprs)
+  _ -> Nothing
+
 extractNode :: Expr X X -> Maybe XH.Node
-extractNode x = case x of
+extractNode = \case
   App (Var (V "nodeText" 0)) (TextLit t) -> 
     Just (XH.TextNode (LT.toStrict (TB.toLazyText t)))
   App (App (App (Var (V "nodeElement" 0)) (TextLit t)) (ListLit _ xpairs)) (ListLit _ v) -> do
     pairs <- mapM extractPairs xpairs
     nodes <- mapM extractNode v
-    Just (XH.Element (LT.toStrict (TB.toLazyText t)) (V.toList pairs) nodes)
+    Just (XH.Element (LT.toStrict (TB.toLazyText t)) (V.toList pairs) (V.toList nodes))
   _ -> Nothing
 
-extractPairs :: Expr X X -> Maybe [(T.Text,T.Text)]
-extractPairs = _
+requireTextLiteral :: Expr s a -> Maybe T.Text
+requireTextLiteral = \case
+  TextLit t -> Just (LT.toStrict (TB.toLazyText t))
+  _ -> Nothing
 
+lookupTextLiteral :: 
+     LT.Text -- ^ key
+  -> M.Map LT.Text (Expr s a) -- ^ map
+  -> Maybe T.Text
+lookupTextLiteral key = requireTextLiteral <=< M.lookup key
 
--- data Node
---   = NodeText Data.Text.Lazy.Text
---   | NodeElement Data.Text.Lazy.Text (Vector Node)
---   deriving (Show)
+extractPairs :: Expr s a -> Maybe (T.Text,T.Text)
+extractPairs = \case
+  RecordLit m -> liftA2 (,) (lookupTextLiteral "name" m) (lookupTextLiteral "value" m)
+  _ -> Nothing
 
