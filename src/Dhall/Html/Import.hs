@@ -738,7 +738,7 @@ loadStaticWith ctx path = do
     if cached
         then return ()
         else case Dhall.TypeCheck.typeWith ctx expr of
-            Left  err -> liftIO (throwIO (Imported (path:paths) err))
+            Left  err -> liftIO (throwIO (Imported (path:paths) (Dhall.TypeCheck.DetailedTypeError err)))
             Right _   -> return ()
 
     return expr

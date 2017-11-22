@@ -18,6 +18,7 @@ import Control.Exception (Exception)
 import Data.Vector (Vector)
 import Control.Monad
 import Control.Applicative (liftA2)
+import Data.Bifunctor (first)
 import qualified Data.Vector as V
 import qualified Data.Map.Strict as M
 import qualified Text.XmlHtml as XH
@@ -63,19 +64,18 @@ nodeExpr text = do
   expr     <- throws (Dhall.Parser.exprFromText delta text)
   expr'    <- Dhall.Html.Import.loadWith domContext expr
   let suffix =
-          ( Data.ByteString.Lazy.toStrict
-          . Data.Text.Lazy.Encoding.encodeUtf8
-          . Data.Text.Lazy.Builder.toLazyText
-          . build
-          ) expected
+        ( Data.ByteString.Lazy.toStrict
+        . Data.Text.Lazy.Encoding.encodeUtf8
+        . Data.Text.Lazy.Builder.toLazyText
+        . build
+        ) expected
   let annot = case expr' of
-          Note (Src begin end bytes) _ ->
-              Note (Src begin end bytes') (Annot expr' expected)
-            where
-              bytes' = bytes <> " : " <> suffix
-          _ ->
-              Annot expr' expected
-  typeExpr <- throws (typeDom annot)
+        Note (Src begin end bytes) _ ->
+            Note (Src begin end bytes') (Annot expr' expected)
+          where
+            bytes' = bytes <> " : " <> suffix
+        _ -> Annot expr' expected
+  typeExpr <- throws (first DetailedTypeError (typeDom annot))
   let normalized = Dhall.Core.normalize expr' :: Expr X X
   case extractNodes normalized of
       Just x  -> return x

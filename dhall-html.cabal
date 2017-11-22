@@ -1,17 +1,17 @@
-name:                dhall-html
-version:             0.1
--- synopsis:
--- description:
-homepage:            https://github.com/andrewthad/dhall-html#readme
-license:             BSD3
-license-file:        LICENSE
-author:              Andrew Martin
-maintainer:          andrew.thaddeus@gmail.com
-copyright:           2017 Andrew Martin
-category:            Web
-build-type:          Simple
-extra-source-files:  README.md
-cabal-version:       >=1.10
+name: dhall-html
+version: 0.1
+synopsis: HTML Templating with Dhall
+description: HTML Templating with Dhall
+homepage: https://github.com/andrewthad/dhall-html#readme
+license: BSD3
+license-file: LICENSE
+author: Andrew Martin
+maintainer: andrew.thaddeus@gmail.com
+copyright: 2017 Andrew Martin
+category: Web
+build-type: Simple
+extra-source-files: README.md
+cabal-version: >=1.10
 
 library
   hs-source-dirs: src
