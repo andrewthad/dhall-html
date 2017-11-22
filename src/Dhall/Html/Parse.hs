@@ -31,6 +31,7 @@ data HtmlError
   | HtmlErrorLetMissingIn
   | HtmlErrorLetChildrenAfterIn
   | HtmlErrorLetBindAttributes
+  | HtmlErrorVarMissingName
   deriving (Show,Eq)
 
 instance Exception HtmlError
@@ -44,19 +45,22 @@ stripComments = \case
 
 strippedToExprList :: [Stripped] -> Either HtmlError (Expr s a)
 strippedToExprList children =
-  fmap (ListLit (Just nodeType)) (mapM strippedToExpr (V.fromList children))
+  fmap (L.foldr ListAppend (ListLit (Just nodeType) V.empty)) (mapM strippedToExpr children)
 
 strippedToExpr :: Stripped -> Either HtmlError (Expr s a)
 strippedToExpr = \case
-  StrippedText t -> Right (App (Var (V "nodeText" 0)) (TextLit (TB.fromText t)))
+  StrippedText t -> Right (ListLit (Just nodeType) (V.singleton (App (Var (V "nodeText" 0)) (TextLit (TB.fromText t)))))
   StrippedElement theTag attrs children -> case theTag of
     "let" -> letGroup children
+    "var" -> case L.lookup "name" attrs of
+      Just name -> Right $ Var $ V (LT.fromStrict name) 0
+      Nothing -> Left HtmlErrorVarMissingName
     _ -> do
-      xs <- mapM strippedToExpr (V.fromList children)
-      return $ 
+      xs <- mapM strippedToExpr children
+      return $ ListLit Nothing $ V.singleton
         ( App 
           (App (App (Var (V "nodeElement" 0)) (TextLit (TB.fromText theTag))) (ListLit (Just attrsType) (attributesToExpr attrs)))
-          (ListLit (Just nodeType) xs)
+          (L.foldr ListAppend (ListLit (Just nodeType) V.empty) xs)
         )
 letGroup :: [Stripped] -> Either HtmlError (Expr s a)
 letGroup ys = case ys of
